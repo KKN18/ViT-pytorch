@@ -1,0 +1,5 @@
+##Testing Results##
+
+Model name: ViT_3rd
+Test Loss: 0.04778
+Test Accuracy: 0.98870

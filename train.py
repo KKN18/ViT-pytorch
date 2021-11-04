@@ -106,7 +106,7 @@ def valid(args, model, writer, test_loader, global_step):
         batch = tuple(t.to(args.device) for t in batch)
         x, y = batch
         with torch.no_grad():
-            logits = model(x)
+            logits = model(x)[0]
 
             eval_loss = loss_fct(logits, y)
             eval_losses.update(eval_loss.item())
@@ -133,7 +133,6 @@ def valid(args, model, writer, test_loader, global_step):
     logger.info("Global Steps: %d" % global_step)
     logger.info("Valid Loss: %2.5f" % eval_losses.avg)
     logger.info("Valid Accuracy: %2.5f" % accuracy)
-
     writer.add_scalar("test/accuracy", scalar_value=accuracy, global_step=global_step)
     return accuracy
 
@@ -213,6 +212,9 @@ def train(args, model):
                 optimizer.step()
                 optimizer.zero_grad()
                 global_step += 1
+                f = open('./global_steps/'+args.name, 'a')
+                f.write('Global Step %d - Loss %2.5f\n' % (global_step, losses.val))
+                f.close()
 
                 epoch_iterator.set_description(
                     "Training (%d / %d Steps) (loss=%2.5f)" % (global_step, t_total, losses.val)
@@ -269,11 +271,11 @@ def main():
                         help="The initial learning rate for SGD.")
     parser.add_argument("--weight_decay", default=0, type=float,
                         help="Weight deay if we apply some.")
-    parser.add_argument("--num_steps", default=500, type=int,
+    parser.add_argument("--num_steps", default=10000, type=int,
                         help="Total number of training epochs to perform.")
     parser.add_argument("--decay_type", choices=["cosine", "linear"], default="cosine",
                         help="How to decay the learning rate.")
-    parser.add_argument("--warmup_steps", default=100, type=int,
+    parser.add_argument("--warmup_steps", default=500, type=int,
                         help="Step of training to perform learning rate warmup for.")
     parser.add_argument("--max_grad_norm", default=1.0, type=float,
                         help="Max gradient norm.")
@@ -296,15 +298,9 @@ def main():
     args = parser.parse_args()
 
     # Setup CUDA, GPU & distributed training
-    if args.local_rank == -1:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        args.n_gpu = torch.cuda.device_count()
-    else:  # Initializes the distributed backend which will take care of sychronizing nodes/GPUs
-        torch.cuda.set_device(args.local_rank)
-        device = torch.device("cuda", args.local_rank)
-        torch.distributed.init_process_group(backend='nccl',
-                                             timeout=timedelta(minutes=60))
-        args.n_gpu = 1
+    device = torch.device("cuda")
+    args.n_gpu = 1
+    
     args.device = device
 
     # Setup logging

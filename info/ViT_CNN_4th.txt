@@ -1,0 +1,4 @@
+gradient step 10
+kernel size 3
+stride 2
+padding 1

@@ -31,15 +31,17 @@ def get_testing():
     return config
 
 
+#gradient_accumulation_step 1: 10 2: 7 3: 7 CNN_1st: 10
+
 def get_b16_config():
     """Returns the ViT-B/16 configuration."""
     config = ml_collections.ConfigDict()
     config.patches = ml_collections.ConfigDict({'size': (16, 16)})
-    config.hidden_size = 768
+    config.hidden_size = 768 #1: 768 2: 768 3: 708 CNN_1st: 768
     config.transformer = ml_collections.ConfigDict()
     config.transformer.mlp_dim = 3072
-    config.transformer.num_heads = 12
-    config.transformer.num_layers = 12
+    config.transformer.num_heads = 12 #1: 12 2 : 12 3: 12 CNN_1st: 12
+    config.transformer.num_layers = 10 #1: 12 2: 10 3: 12 CNN_1st: 10
     config.transformer.attention_dropout_rate = 0.0
     config.transformer.dropout_rate = 0.1
     config.classifier = 'token'

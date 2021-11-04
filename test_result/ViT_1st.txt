@@ -1,0 +1,5 @@
+##Testing Results##
+
+Model name: ViT_1st
+Test Loss: 0.04066
+Test Accuracy: 0.99000

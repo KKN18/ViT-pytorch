@@ -1,0 +1,5 @@
+##Testing Results##
+
+Model name: ViT_CNN_2nd_checkpoint
+Test Loss: 0.67594
+Test Accuracy: 0.82350
