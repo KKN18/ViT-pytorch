@@ -88,8 +88,8 @@ class Attention(nn.Module):
         assert(PATCH_X == PATCH_Y and PATCH_X != 0)
         n_in = PATCH_X
 
-        self.kernel_size=3
-        self.stride=2
+        self.kernel_size=2
+        self.stride=1
         self.padding=1
         
         self.n_out = (n_in+2*self.padding-self.kernel_size)//self.stride + 1
@@ -117,24 +117,25 @@ class Attention(nn.Module):
         # hidden_states shape [51, 197, 768]
         h_shape = hidden_states.shape
         cls, img_tokens = torch.split(hidden_states, [1, h_shape[1]-1], dim=1)
-        query_layer = self.query(img_tokens)
+        
+        query_layer = self.query(hidden_states)
         key_layer = self.key(hidden_states)
         value_layer = self.value(hidden_states)
 
         k_shape = key_layer.shape
         v_shape = value_layer.shape
-        pdb.set_trace()
+        # pdb.set_trace()
        
         global PATCH_X # 14
         global PATCH_Y # 14 
   
         # (Removed) remove cls token
-        # key_cls, key_layer = torch.split(mixed_key_layer, [1, k_shape[1]-1], dim=1)
-        # value_cls, value_layer = torch.split(mixed_value_layer, [1, v_shape[1]-1], dim=1)
+        key_cls, key_layer = torch.split(mixed_key_layer, [1, k_shape[1]-1], dim=1)
+        value_cls, value_layer = torch.split(mixed_value_layer, [1, v_shape[1]-1], dim=1)
 
         # (Removed) shape without cls [51, 196, 768] = [B, HxW, C]
-        # only_key_shape = key_layer.shape
-        # only_value_shape = value_layer.shape
+        only_key_shape = key_layer.shape
+        only_value_shape = value_layer.shape
 
         # reshape from [B, HxW, C] to [B, H, W, C]
         reshaped_key_layer = key_layer.reshape(k_shape[0], PATCH_X, PATCH_Y, k_shape[2])
@@ -174,8 +175,8 @@ class Attention(nn.Module):
         cat_value_layer = torch.cat((value_cls, mixed_value_layer), dim=1)
 
         # final shape [51, 50, 768], Not used
-        final_key_layer = cat_key_layer 
-        final_value_layer = cat_value_layer
+        # final_key_layer = cat_key_layer 
+        # final_value_layer = cat_value_layer
 
         query_layer = self.transpose_for_scores(mixed_query_layer)
         key_layer = self.transpose_for_scores(cat_key_layer)
