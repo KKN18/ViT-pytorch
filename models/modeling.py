@@ -80,33 +80,26 @@ class Attention(nn.Module):
 
         self.softmax = Softmax(dim=-1)
 
-        #self.key_conv2d = nn.Conv2d(config.hidden_size, config.hidden_size, kernel_size=3, padding='same', padding_mode='zeros')
-        #self.value_conv2d = nn.Conv2d(config.hidden_size, config.hidden_size, kernel_size=3, padding='same', padding_mode='zeros')
         
         global PATCH_X
         global PATCH_Y
         assert(PATCH_X == PATCH_Y and PATCH_X != 0)
-        n_in = PATCH_X
+        n_in = PATCH_X # 14
 
-        self.kernel_size=2
-        self.stride=1
+        self.kernel_size=3
+        self.stride=2
         self.padding=1
         
         self.n_out = (n_in+2*self.padding-self.kernel_size)//self.stride + 1
 
-        self.key_conv2d = nn.Conv2d(config.hidden_size, config.hidden_size, kernel_size=self.kernel_size, stride=self.stride, padding=self.padding, padding_mode='zeros') 
-        self.value_conv2d = nn.Conv2d(config.hidden_size, config.hidden_size, kernel_size=self.kernel_size, stride=self.stride, padding=self.padding, padding_mode='zeros')
+        self.linear = nn.Linear(n_in**2, self.n_out**2)
+        self.conv2d = nn.Conv2d(config.hidden_size, config.hidden_size, kernel_size=self.kernel_size, stride=self.stride, padding=self.padding, padding_mode='zeros')
+        self.groupnorm = nn.GroupNorm(1, config.hidden_size)
+        self.seq_conv2d = nn.Sequential(self.conv2d, self.groupnorm, nn.ReLU())
+        print('Seq Conv2d Success')
+        nn.init.xavier_uniform(self.conv2d.weight)
 
-        nn.init.xavier_uniform(self.key_conv2d.weight)
-        nn.init.xavier_uniform(self.value_conv2d.weight)
        
-        #self.is_shortcut_possible = False
-        #if (n_in % self.n_out == 0):
-        #    self.is_shortcut_possible = True
-        #    ratio = n_in // self.n_out
-        #    self.extend_hidden_size = config.hidden_size * (ratio ** 2)
-        #    self.fc = nn.Linear(self.extend_hidden_size, config.hidden_size)
-        #    nn.init.xavier_uniform(self.fc.weight)
 
     def transpose_for_scores(self, x):
         new_x_shape = x.size()[:-1] + (self.num_attention_heads, self.attention_head_size)
@@ -115,8 +108,8 @@ class Attention(nn.Module):
 
     def forward(self, hidden_states):
         # hidden_states shape [51, 197, 768]
-        h_shape = hidden_states.shape
-        cls, img_tokens = torch.split(hidden_states, [1, h_shape[1]-1], dim=1)
+        #h_shape = hidden_states.shape
+        #cls, img_tokens = torch.split(hidden_states, [1, h_shape[1]-1], dim=1)
         
         query_layer = self.query(hidden_states)
         key_layer = self.key(hidden_states)
@@ -129,35 +122,56 @@ class Attention(nn.Module):
         global PATCH_X # 14
         global PATCH_Y # 14 
   
-        # (Removed) remove cls token
-        key_cls, key_layer = torch.split(mixed_key_layer, [1, k_shape[1]-1], dim=1)
-        value_cls, value_layer = torch.split(mixed_value_layer, [1, v_shape[1]-1], dim=1)
+        # remove cls token
+        key_cls, key_layer = torch.split(key_layer, [1, k_shape[1]-1], dim=1)
+        value_cls, value_layer = torch.split(value_layer, [1, v_shape[1]-1], dim=1)
 
-        # (Removed) shape without cls [51, 196, 768] = [B, HxW, C]
+        #shape without cls [51, 196, 768] = [B, HxW, C]
         only_key_shape = key_layer.shape
         only_value_shape = value_layer.shape
 
+        # CNN Code
         # reshape from [B, HxW, C] to [B, H, W, C]
-        reshaped_key_layer = key_layer.reshape(k_shape[0], PATCH_X, PATCH_Y, k_shape[2])
-        reshaped_value_layer = value_layer.reshape(v_shape[0], PATCH_X, PATCH_Y, v_shape[2])
-
+        key_layer1 = key_layer.reshape(k_shape[0], PATCH_X, PATCH_Y, k_shape[2])
+        value_layer1 = value_layer.reshape(k_shape[0], PATCH_X, PATCH_Y, k_shape[2])
 
         # change to CNN input dimension [B, C, H, W]
-        mixed_key_layer_4D = reshaped_key_layer.permute(0, 3, 1, 2).contiguous()
-        mixed_value_layer_4D = reshaped_value_layer.permute(0, 3, 1, 2).contiguous()
-    
-        # CNN forward
-        conv_key_layer = self.key_conv2d(mixed_key_layer_4D)
-        conv_value_layer = self.value_conv2d(mixed_value_layer_4D)
+        key_layer1 = key_layer1.permute(0, 3, 1, 2).contiguous()
+        value_layer1 = value_layer1.permute(0, 3, 1, 2).contiguous()
 
-        # restore original dimension [B, H, W, C]
+        # CNN Forward
+        conv_key_layer = self.seq_conv2d(key_layer1)
+        conv_value_layer = self.seq_conv2d(value_layer1)
+
+        # restore original dimension [B, H/2, W/2, C]
         conv_key_layer = conv_key_layer.permute(0, 2, 3, 1).contiguous()
         conv_value_layer = conv_value_layer.permute(0, 2, 3, 1).contiguous()
 
+        # FC Code
+        # permute to [B, C, HxW]
+        key_layer2 = key_layer.permute(0, 2, 1).contiguous()
+        value_layer2 = value_layer.permute(0, 2, 1).contiguous()
+
+        # Linear Forward [B, C, H/2xW/2]
+        fc_key_layer = self.linear(key_layer2)
+        fc_value_layer = self.linear(value_layer2)
+        
+        # reshape to [B, C, H/2, W/2]
+        fc_key_layer = fc_key_layer.reshape(k_shape[0], k_shape[2], PATCH_X//2, PATCH_Y//2)
+        fc_value_layer = fc_value_layer.reshape(k_shape[0], k_shape[2], PATCH_X//2, PATCH_Y//2)
+
+        # restore original dimension [B, H/2, W/2, C]
+        fc_key_layer = fc_key_layer.permute(0, 2, 3, 1).contiguous()
+        fc_value_layer = fc_value_layer.permute(0, 2, 3, 1).contiguous()
+
+        # Add CNN Code and FC Code
+        total_key_layer = conv_key_layer + fc_key_layer
+        total_value_layer = conv_value_layer + fc_value_layer
+
         # restore initial shape without cls [51, 49, 768]
         after_conv_shape = (only_key_shape[0], self.n_out ** 2, only_key_shape[2])
-        mixed_key_layer = conv_key_layer.reshape(after_conv_shape)
-        mixed_value_layer = conv_value_layer.reshape(after_conv_shape)
+        mixed_key_layer = total_key_layer.reshape(after_conv_shape)
+        mixed_value_layer = total_value_layer.reshape(after_conv_shape)
 
         # add shortcut if possible
         # if (self.is_shortcut_possible):
@@ -178,7 +192,7 @@ class Attention(nn.Module):
         # final_key_layer = cat_key_layer 
         # final_value_layer = cat_value_layer
 
-        query_layer = self.transpose_for_scores(mixed_query_layer)
+        query_layer = self.transpose_for_scores(query_layer)
         key_layer = self.transpose_for_scores(cat_key_layer)
         value_layer = self.transpose_for_scores(cat_value_layer)
 
@@ -194,7 +208,7 @@ class Attention(nn.Module):
         context_layer = context_layer.view(*new_context_layer_shape)
         attention_output = self.out(context_layer)
         attention_output = self.proj_dropout(attention_output)
-        pdb.set_trace()
+        #pdb.set_trace()
         return attention_output, weights
 
 
